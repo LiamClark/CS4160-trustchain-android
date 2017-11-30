@@ -148,109 +148,8 @@ public class TrustChainBlock {
         MessageProto.TrustChainBlock linkBlock = dbHelper.getLinkedBlock(block);
         MessageProto.TrustChainBlock prevBlock = dbHelper.getBlockBefore(block.getPublicKey().toByteArray(),block.getSequenceNumber());
         MessageProto.TrustChainBlock nextBlock = dbHelper.getBlockAfter(block.getPublicKey().toByteArray(),block.getSequenceNumber());
-
-        // ** Step 2: Determine the maximum validation level **
-        // Depending on the blocks we get from the database, we can decide to reduce the validation
-        // level. We must do this prior to flagging any errors. This way we are only ever reducing
-        // the validation level without having to resort to min()/max() every time we set it.
-        if(prevBlock == null && nextBlock == null) {
-            // If it is not a genesis block we know nothing about this public key, else pretend prevblock exists
-            if(!isGenesisBlock(block)) {
-                result.setNoInfo();
-            } else {
-                result.setPartialNext();
-            }
-        } else if(prevBlock == null) {
-            // If it is not a genesis block we are missing the previous block
-            if(!isGenesisBlock(block)){
-                result.setPartialPrevious();
-                // If there is a gap between this block and the next we have a full partial validation result
-                if(nextBlock.getSequenceNumber() != block.getSequenceNumber() + 1){
-                    result.setPartial();
-                }
-            }
-            // if it is a genesis block, ignore that there is no previous block, check for a gap for the next block
-            else if(nextBlock.getSequenceNumber() != block.getSequenceNumber() + 1) {
-                result.setPartialNext();
-            }
-        } else if(nextBlock == null) {
-            // The next block is missing so partial next at best
-            result.setPartialNext();
-            // If there is a gap between this and the previous block, full partial validation result
-            if(prevBlock.getSequenceNumber() != block.getSequenceNumber() - 1) {
-                result.setPartial();
-            }
-        } else {
-            // Both sides have known blocks, check for gaps
-            // check gap previous
-            if(prevBlock.getSequenceNumber() != block.getSequenceNumber() - 1) {
-                result.setPartialPrevious();
-                // check gap previous and next
-                if(nextBlock.getSequenceNumber() != block.getSequenceNumber() + 1){
-                    result.setPartial();
-                }
-            } else {
-                // check gap next block, if not the result stays valid
-                if(nextBlock.getSequenceNumber() != block.getSequenceNumber() + 1){
-                    result.setPartialNext();
-                }
-            }
-        }
-
-        // ** Step 3: validate that the block is sane, including the validity of the transaction **
-        // Some basic self checks are performed. It is possible to violate these when constructing a
-        // block in code or getting a block from the database. The wire format is such that it is
-        // impossible to hit many of these for blocks that went over the network.
-
-        ValidationResult txValidation = validateTransaction(block, db);
-        if(txValidation.getStatus() != ValidationStatus.VALID) {
-            result.setStatus(txValidation.getStatus());
-            for (String error : txValidation.getErrors()) {
-                errors.add(error);
-            }
-        }
-
-        if(block.getSequenceNumber() < GENESIS_SEQ) {
-            result.setInvalid();
-            errors.add("Sequence number is prior to genesis. Number is now" + block.getSequenceNumber() + ", genesis: " + GENESIS_SEQ);
-        }
-        if(block.getLinkSequenceNumber() < GENESIS_SEQ && block.getLinkSequenceNumber() != UNKNOWN_SEQ) {
-            result.setInvalid();
-            errors.add("Link sequence number not empty and is prior to genesis");
-        }
-
-        //TODO: resolve stupid conversions byte[] => Base64 => byte[]
-        String key = Base64.encodeToString(block.getPublicKey().toByteArray(), Base64.DEFAULT);
-        PublicKey publicKey = Key.loadPublicKey(key);
-        if(publicKey == null) {
-            result.setInvalid();
-            errors.add("Public key is not valid");
-        } else {
-            // If public key is valid, check validity of signature
-            byte[] hash = hash(block);
-            byte[] signature = block.getSignature().toByteArray();
-            if (!Key.verify(publicKey, hash, signature)) {
-                result.setInvalid();
-                errors.add("Invalid signature.");
-            }
-        }
-
-        // If a block is linked with a block of the same owner it does not serve any purpose and is invalid.
-        if(block.getPublicKey().equals(block.getLinkPublicKey())) {
-            result.setInvalid();
-            errors.add("Self linked block");
-        }
-        // If it is implied that block is a genesis block, check if it correctly set up
-        if(isGenesisBlock(block)){
-            if(block.getSequenceNumber() == GENESIS_SEQ && !block.getPreviousHash().equals(GENESIS_HASH)) {
-                result.setInvalid();
-                errors.add("Sequence number implies previous hash should be Genesis Hash");
-            }
-            if(block.getSequenceNumber() != GENESIS_SEQ && block.getPreviousHash().equals(GENESIS_HASH)) {
-                result.setInvalid();
-                errors.add("Sequence number implies previous hash should not be Genesis Hash");
-            }
-        }
+        step2(block, result, prevBlock, nextBlock);
+        step3(block, db, result, errors);
 
         // ** Step 4: does the database already know about this block? **
         // If so it should be equal or else we caught a branch in someones trustchain.
@@ -350,6 +249,111 @@ public class TrustChainBlock {
         return result.setErrors(errors);
     }
 
+    // ** Step 3: validate that the block is sane, including the validity of the transaction **
+    // Some basic self checks are performed. It is possible to violate these when constructing a
+    // block in code or getting a block from the database. The wire format is such that it is
+    // impossible to hit many of these for blocks that went over the network.
+     static void step3(MessageProto.TrustChainBlock block, SQLiteDatabase db, ValidationResult result, List<String> errors) {
+        ValidationResult txValidation = validateTransaction(block, db);
+        if(txValidation.getStatus() != ValidationStatus.VALID) {
+            result.setStatus(txValidation.getStatus());
+            for (String error : txValidation.getErrors()) {
+                errors.add(error);
+            }
+        }
+
+        if(block.getSequenceNumber() < GENESIS_SEQ) {
+            result.setInvalid();
+            errors.add("Sequence number is prior to genesis. Number is now" + block.getSequenceNumber() + ", genesis: " + GENESIS_SEQ);
+        }
+        if(block.getLinkSequenceNumber() < GENESIS_SEQ && block.getLinkSequenceNumber() != UNKNOWN_SEQ) {
+            result.setInvalid();
+            errors.add("Link sequence number not empty and is prior to genesis");
+        }
+
+        //TODO: resolve stupid conversions byte[] => Base64 => byte[]
+        String key = Base64.encodeToString(block.getPublicKey().toByteArray(), Base64.DEFAULT);
+        PublicKey publicKey = Key.loadPublicKey(key);
+        if(publicKey == null) {
+            result.setInvalid();
+            errors.add("Public key is not valid");
+        } else {
+            // If public key is valid, check validity of signature
+            byte[] hash = hash(block);
+            byte[] signature = block.getSignature().toByteArray();
+            if (!Key.verify(publicKey, hash, signature)) {
+                result.setInvalid();
+                errors.add("Invalid signature.");
+            }
+        }
+
+        // If a block is linked with a block of the same owner it does not serve any purpose and is invalid.
+        if(block.getPublicKey().equals(block.getLinkPublicKey())) {
+            result.setInvalid();
+            errors.add("Self linked block");
+        }
+        // If it is implied that block is a genesis block, check if it correctly set up
+        if(isGenesisBlock(block)){
+            if(block.getSequenceNumber() == GENESIS_SEQ && !block.getPreviousHash().equals(GENESIS_HASH)) {
+                result.setInvalid();
+                errors.add("Sequence number implies previous hash should be Genesis Hash");
+            }
+            if(block.getSequenceNumber() != GENESIS_SEQ && block.getPreviousHash().equals(GENESIS_HASH)) {
+                result.setInvalid();
+                errors.add("Sequence number implies previous hash should not be Genesis Hash");
+            }
+        }
+    }
+
+    static void step2(MessageProto.TrustChainBlock block, ValidationResult result, MessageProto.TrustChainBlock prevBlock, MessageProto.TrustChainBlock nextBlock) {
+        // ** Step 2: Determine the maximum validation level **
+        // Depending on the blocks we get from the database, we can decide to reduce the validation
+        // level. We must do this prior to flagging any errors. This way we are only ever reducing
+        // the validation level without having to resort to min()/max() every time we set it.
+        if(prevBlock == null && nextBlock == null) {
+            // If it is not a genesis block we know nothing about this public key, else pretend prevblock exists
+            if(!isGenesisBlock(block)) {
+                result.setNoInfo();
+            } else {
+                result.setPartialNext();
+            }
+        } else if(prevBlock == null) {
+            // If it is not a genesis block we are missing the previous block
+            if(!isGenesisBlock(block)){
+                result.setPartialPrevious();
+                // If there is a gap between this block and the next we have a full partial validation result
+                if(nextBlock.getSequenceNumber() != block.getSequenceNumber() + 1){
+                    result.setPartial();
+                }
+            }
+            // if it is a genesis block, ignore that there is no previous block, check for a gap for the next block
+            else if(nextBlock.getSequenceNumber() != block.getSequenceNumber() + 1) {
+                result.setPartialNext();
+            }
+        } else if(nextBlock == null) {
+            // The next block is missing so partial next at best
+            result.setPartialNext();
+            // If there is a gap between this and the previous block, full partial validation result
+            if(prevBlock.getSequenceNumber() != block.getSequenceNumber() - 1) {
+                result.setPartial();
+            }
+        } else {
+            // Both sides have known blocks, check for gaps
+            // check gap previous
+            if(prevBlock.getSequenceNumber() != block.getSequenceNumber() - 1) {
+                result.setPartialPrevious();
+                // check gap previous and next
+                if(nextBlock.getSequenceNumber() != block.getSequenceNumber() + 1){
+                    result.setPartial();
+                }
+            } else {
+                // check gap next block, if not the result stays valid
+                if(nextBlock.getSequenceNumber() != block.getSequenceNumber() + 1){
+                    result.setPartialNext();
+                }
+            }
+        }
+    }
 
 
     /**

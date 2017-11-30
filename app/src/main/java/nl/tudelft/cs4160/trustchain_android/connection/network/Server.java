@@ -1,6 +1,8 @@
 package nl.tudelft.cs4160.trustchain_android.connection.network;
 
 
+import android.util.Log;
+
 import java.io.IOException;
 import java.io.OutputStream;
 import java.io.PrintStream;
@@ -17,6 +19,7 @@ import nl.tudelft.cs4160.trustchain_android.message.MessageProto;
  * Class is package private to prevent another activity from accessing it and breaking everything
  */
 class Server {
+    private static final String TAG = "Server";
     ServerSocket serverSocket;
 
     String messageLog = "";
@@ -60,6 +63,7 @@ class Server {
 
                     // We have received a message, this could be either a crawl request or a halfblock
                     MessageProto.Message message = MessageProto.Message.parseFrom(socket.getInputStream());
+                    Log.i(TAG, "recieved message" +  message.toString());
                     Peer peer = new Peer(null, socket.getInetAddress().getHostAddress(), socket.getPort());
                     communication.receivedMessage(message, peer);
 

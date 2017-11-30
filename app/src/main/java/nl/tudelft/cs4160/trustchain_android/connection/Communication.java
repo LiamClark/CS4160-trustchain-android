@@ -79,7 +79,7 @@ public abstract class Communication {
         if (sq >= 0) {
             sq = Math.max(GENESIS_SEQ, sq);
         }
-
+        Log.i(TAG, "known peers" + peers.toString());
         Log.i(TAG, "Requesting crawl of node " + bytesToHex(publicKey) + ":" + sq);
 
         MessageProto.CrawlRequest crawlRequest =

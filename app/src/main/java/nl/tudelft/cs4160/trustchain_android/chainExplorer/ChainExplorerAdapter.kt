@@ -19,7 +19,7 @@ import nl.tudelft.cs4160.trustchain_android.Peer.bytesToHex
 import kotlinx.android.synthetic.main.item_trustchainblock.view.*
 
 class ChainExplorerAdapter(internal var context: Context, internal var blocksList: List<MessageProto.TrustChainBlock>, myPubKey: ByteArray) : BaseAdapter() {
-    internal var peerList = HashMap<ByteString, String>()
+    var peerList = HashMap<ByteString, String>()
 
     init {
         // put my public key in the peerList
@@ -83,13 +83,13 @@ class ChainExplorerAdapter(internal var context: Context, internal var blocksLis
     }
 
     // Check if we already know the peer, otherwise add it to the peerList
-    internal fun findInPeersOrAdd(keyByteString: ByteString): String = peerList.getOrPut(keyByteString, { "peer" + (peerList.size - 1) })
+    fun findInPeersOrAdd(keyByteString: ByteString): String = peerList.getOrPut(keyByteString, { "peer" + (peerList.size - 1) })
 
 
     companion object {
 
         // Check if the sequence numbers are 0, which would mean that they are unknown
-        internal fun displayStringForSequenceNumber(sequenceNumber: Int): String {
+        fun displayStringForSequenceNumber(sequenceNumber: Int): String {
             return if (sequenceNumber == 0) {
                 "unknown"
             } else {
